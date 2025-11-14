@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import tensorflow as tf
 import numpy as np
@@ -8,11 +9,11 @@ import os
 st.set_page_config(page_title="Tree Species Classifier", layout="centered")
 
 # ---------------------------
-# CONFIG - Change model name if yours is different
+# CONFIG - using your provided model filename
 # ---------------------------
-MODEL_PATH = "improved_cnn_model.h5"   # ← change if your model file name is different
+MODEL_PATH = "basic_cnn_tree_species.h5"   # <<-- your uploaded model
 CLASSES_PATH = "classes.json"
-IMG_SIZE = (224, 224)  # must match your training image size
+IMG_SIZE = (224, 224)  # keep as-is; if you trained with a different size, change here
 
 # ---------------------------
 # LOAD MODEL + CLASSES
@@ -26,23 +27,23 @@ def load_model_and_classes():
     
     model = tf.keras.models.load_model(MODEL_PATH, compile=False)
 
-    # Load class labels
+    # Load class labels if available
     if os.path.exists(CLASSES_PATH):
         with open(CLASSES_PATH, "r") as f:
             idx2class = json.load(f)
+        # ensure int keys
         idx2class = {int(k): v for k, v in idx2class.items()}
     else:
-        # Fallback if no classes.json exists
+        # fallback labels (0..N-1)
         num_classes = model.output_shape[-1]
         idx2class = {i: f"Class {i}" for i in range(num_classes)}
     
     return model, idx2class
 
-
 model, idx2class = load_model_and_classes()
 
 st.title("🌳 Tree Species Classifier")
-st.write("Upload an image of a tree, leaf, or bark — the model will predict its species.")
+st.write("Upload an image of a tree/leaf/bark — the model will predict the species.")
 
 # ---------------------------
 # IMAGE UPLOADER
@@ -53,7 +54,6 @@ if uploaded is None:
     st.info("Please upload an image to begin.")
     st.stop()
 
-# show uploaded image
 img = Image.open(uploaded).convert("RGB")
 st.image(img, caption="Uploaded Image", use_column_width=True)
 
