@@ -61,12 +61,35 @@ if uploaded is None:
 img = Image.open(uploaded).convert("RGB")
 st.image(img, caption="Uploaded Image", use_column_width=True)
 
+# Debug toggle: enable to print more internals for troubleshooting
+debug = st.checkbox("Show debug info", value=False)
+
 if st.button("Predict"):
     if model is None:
         st.error("Model not loaded.")
         st.stop()
 
     x = preprocess_image(img, IMG_SIZE)
+
+    # When debugging, show preprocessing & input tensor info
+    if debug:
+        st.subheader("Debug: input / preprocessing")
+        st.write({
+            "PIL mode": getattr(img, "mode", None),
+            "PIL size": getattr(img, "size", None),
+            "preprocessed_shape": x.shape,
+            "dtype": str(x.dtype)
+        })
+        try:
+            st.write("pixel range / stats:", {
+                "min": float(x.min()),
+                "max": float(x.max()),
+                "mean": float(x.mean())
+            })
+            flat = x.flatten()
+            st.write("first 20 preprocessed values:", flat[:20].tolist())
+        except Exception as e:
+            st.write("Could not compute stats:", e)
 
     try:
         preds = model.predict(x)
@@ -75,12 +98,71 @@ if st.button("Predict"):
         st.error(f"Prediction error: {e}")
         st.stop()
 
+    # Raw prediction output
     st.subheader("Raw model output (first 10 values)")
     try:
-        st.write(out[:10].tolist() if out.size >= 10 else out.tolist())
+        # out might be scalar-like or an array
+        preview = out[:10].tolist() if hasattr(out, "size") and out.size >= 10 else np.atleast_1d(out).tolist()
+        st.write(preview)
     except Exception:
         st.write(str(out))
-    st.write("Output shape:", out.shape)
+    st.write("Output shape:", np.atleast_1d(out).shape)
+
+    # Extra debugging information about model and prediction
+    if debug:
+        st.subheader("Debug: model and prediction internals")
+        try:
+            st.write({
+                "model_input_shape": getattr(model, "input_shape", None),
+                "model_output_shape": getattr(model, "output_shape", None)
+            })
+            st.text("Model summary:")
+            try:
+                model.summary(print_fn=lambda s: st.text(s))
+            except Exception as e:
+                st.text(f"(could not print model.summary: {e})")
+        except Exception as e:
+            st.write("Could not inspect model:", e)
+
+        # Show raw preds array and basic checks
+        try:
+            st.write("Full raw preds:", preds.tolist() if hasattr(preds, "tolist") else str(preds))
+            st.write("preds dtype/shape:", getattr(preds, "dtype", None), np.shape(preds))
+            st.write("Any NaN/inf in preds:", bool(np.isnan(preds).any()), bool(np.isinf(preds).any()))
+        except Exception as e:
+            st.write("Could not show preds details:", e)
+
+        # Show classes mapping loaded earlier
+        try:
+            st.write("Loaded class mapping (idx2class):", idx2class)
+        except Exception:
+            st.write("No class mapping available")
+
+        # Quick self-tests: run model on zero and random inputs to detect constant output
+        try:
+            st.write("Running quick model self-test (zero / random inputs)...")
+            zero = np.zeros_like(x)
+            rand = np.random.random_sample(x.shape).astype(x.dtype)
+            batch = np.concatenate([x, zero, rand], axis=0)
+            test_preds = model.predict(batch)
+            st.write("self-test preds:", test_preds.tolist() if hasattr(test_preds, "tolist") else str(test_preds))
+            # check if outputs are identical across these three
+            try:
+                first = np.array(test_preds[0]).ravel()
+                second = np.array(test_preds[1]).ravel()
+                third = np.array(test_preds[2]).ravel()
+                identical_01 = np.allclose(first, second)
+                identical_02 = np.allclose(first, third)
+                st.write({
+                    "identical(original,zero)": bool(identical_01),
+                    "identical(original,random)": bool(identical_02)
+                })
+                if identical_01 or identical_02:
+                    st.warning("Model produced identical outputs for different inputs — this suggests the trained model may be trivial or there's an input/preprocessing mismatch.")
+            except Exception:
+                pass
+        except Exception as e:
+            st.write("Self-test failed:", e)
 
     # Binary (single output)
     if out.shape[-1] == 1:
